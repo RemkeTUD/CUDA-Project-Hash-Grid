@@ -17,6 +17,7 @@
     <ClInclude Include="Loader.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="HashGridProcessor.h" />
     <ClCompile Include="Loader.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

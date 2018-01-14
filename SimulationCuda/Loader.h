@@ -6,6 +6,8 @@
 #include <limits>
 #include "cuda_runtime.h"
 
+typedef unsigned int uint;
+
 struct ParticleInfo {
 	uint32_t stride = 0;
 	float groupRadius = -1;
