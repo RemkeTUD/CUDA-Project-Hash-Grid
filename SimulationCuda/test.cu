@@ -148,8 +148,8 @@ void writeToFile(const std::string& name, std::vector<std::vector<uint>> grid, u
 	outputFile.close();
 }
 
-ParticleList reduceParticles(const ParticleList pList, float redPercentage) {
-	
+ParticleList reduceParticles(const ParticleList pList, uint targetCount) {
+
 	std::random_device rd;
 
 	/* Random number generator */
@@ -163,15 +163,14 @@ ParticleList reduceParticles(const ParticleList pList, float redPercentage) {
 		b[i] = false;
 	}
 
-	int numRemove = (int)(pList.info.groupCount * redPercentage);
-	for (int i = 0; i < numRemove; i++) {
+	for (int i = 0; i < pList.info.groupCount - targetCount; i++) {
 		uint rNum = distribution(generator);
 		while (b[rNum] == true) {
 			rNum = distribution(generator);
 		}
 		b[rNum] = true;
 	}
-	char* output = new char[(pList.info.groupCount - numRemove) * pList.info.stride];
+	char* output = new char[targetCount * pList.info.stride];
 	int index = 0;
 	for (int i = 0; i < pList.info.groupCount; i++) {
 		if (b[i] == false) {
@@ -182,7 +181,7 @@ ParticleList reduceParticles(const ParticleList pList, float redPercentage) {
 		}
 	}
 	ParticleInfo pInfo = pList.info;
-	pInfo.groupCount = pList.info.groupCount - numRemove;
+	pInfo.groupCount = targetCount;
 	ParticleList particles;
 	particles.info = pInfo;
 	particles.data = output;
@@ -190,158 +189,9 @@ ParticleList reduceParticles(const ParticleList pList, float redPercentage) {
 	return particles;
 }
 
-void benchmarkTimeGPU() {
-	int blocksize = 128;
-	unsigned long long minTime = -1;
-	for (int a = 0; a < 100; a++) {
-/*	while(true){
-		uint number = 0;
-		std::cin >> number;*/
-		
-		Loader loader("exp2mill.mmpld");
-
-		auto pList = loader.getFrame(20);
-
-		/*
-		float3 cellSize;
-		cellSize.x = 1;
-		cellSize.y = 1;
-		cellSize.z = 1;
-		PSystemInfo pSysInfo = loader.calcBSystemInfo(cellSize);
-		*/
-		
-		uint3 gridSize;
-		gridSize.x = 32;
-		gridSize.y = 320;
-		gridSize.z = 32;
-		PSystemInfo pSysInfo = loader.calcBSystemInfo(gridSize);
-		
-//		PSystemInfo pSysInfo = loader.calcBSystemInfo(pList);
-		
-
-		std::cout << "Grid Size: (" << pSysInfo.gridSize.x << ", " << pSysInfo.gridSize.y << ", " << pSysInfo.gridSize.z << ") Origin: (" << pSysInfo.worldOrigin.x << ", " << pSysInfo.worldOrigin.y << ", " << pSysInfo.worldOrigin.z << ") Cell Size: (" << pSysInfo.cellSize.x << ", " << pSysInfo.cellSize.y << ", " << pSysInfo.cellSize.z << ")" << std::endl;
-		
-		std::vector<char*> d_List(pList.size());
-		std::vector<char*> h_List(pList.size());
-
-		std::vector<uint*> d_HashList(pList.size());
-		std::vector<uint*> d_IdList(pList.size());
-		std::vector<uint*> d_CellBegin(pList.size());
-		std::vector<uint*> d_CellEnd(pList.size());
-		
-		long long startTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-		for (int n = 0; n < pList.size(); n++) {
-			auto p = pList[n];
-			
-			HANDLE_ERROR(cudaMalloc(&d_List[n], p.info.stride * p.info.groupCount));
-			HANDLE_ERROR(cudaMemcpy(d_List[n], p.data, p.info.stride * p.info.groupCount, cudaMemcpyHostToDevice));
-
-			
-			HANDLE_ERROR(cudaMalloc(&d_HashList[n], sizeof(uint) * p.info.groupCount * N));
-//			HANDLE_ERROR(cudaMemset(d_HashList[n], -1, sizeof(uint) * p.info.groupCount * N));
-			HANDLE_ERROR(cudaMalloc(&d_IdList[n], sizeof(uint) * p.info.groupCount * N));
-//			HANDLE_ERROR(cudaMemset(d_IdList[n], -1, sizeof(uint) * p.info.groupCount * N));
-			HANDLE_ERROR(cudaMalloc(&d_CellBegin[n], sizeof(uint) * pSysInfo.gridSize.x * pSysInfo.gridSize.y * pSysInfo.gridSize.z));
-			HANDLE_ERROR(cudaMemset(d_CellBegin[n], -1, sizeof(uint) * pSysInfo.gridSize.x * pSysInfo.gridSize.y * pSysInfo.gridSize.z));
-			HANDLE_ERROR(cudaMalloc(&d_CellEnd[n], sizeof(uint) * pSysInfo.gridSize.x * pSysInfo.gridSize.y * pSysInfo.gridSize.z));
-			HANDLE_ERROR(cudaMemset(d_CellEnd[n], -1, sizeof(uint) * pSysInfo.gridSize.x * pSysInfo.gridSize.y * pSysInfo.gridSize.z));
-
-			
-			// kernel call
-			dim3 dimBlock(blocksize);
-			dim3 dimGrid(ceil(pList[n].info.groupCount / (float)blocksize));
-			bool isAligned = true;
-			if (p.info.stride % 2 != 0)
-				isAligned = false;
-
-			
-			fillHashGrid << <dimGrid, dimBlock >> > (d_List[n], d_HashList[n], d_IdList[n], p.info, pSysInfo, isAligned);
-
-//			cudaDeviceSynchronize();
-			
-			thrust::sort_by_key(thrust::device_ptr<uint>(d_HashList[n]),
-				thrust::device_ptr<uint>(d_HashList[n] + p.info.groupCount * N),
-				thrust::device_ptr<uint>(d_IdList[n]));
-			
-			setCellPointers << <dimGrid, dimBlock >> > (d_HashList[n], d_CellBegin[n], d_CellEnd[n], p.info);
-			cudaDeviceSynchronize();
-
-//			cudaDeviceSynchronize();
-			/*
-			uint* h_HashList = new uint[p.info.groupCount * N];
-			uint* h_IdList = new uint[p.info.groupCount * N];
-			HANDLE_ERROR(cudaMemcpy(h_HashList, d_HashList[n], sizeof(uint) * p.info.groupCount * N, cudaMemcpyDeviceToHost));
-			HANDLE_ERROR(cudaMemcpy(h_IdList, d_IdList[n], sizeof(uint) * p.info.groupCount * N, cudaMemcpyDeviceToHost));
-
-			for (int i = 0; i < p.info.groupCount * N; i++) {
-				std::cout << i << ": Hash: " << h_HashList[i] << ", Id: " << h_IdList[i] << std::endl;
-			}
-
-			delete[] h_HashList;
-			delete[] h_IdList;
-			*/
-			/*
-			uint* h_CellBegin = new uint[pSysInfo.gridSize.x * pSysInfo.gridSize.y * pSysInfo.gridSize.z];
-			uint* h_CellEnd = new uint[pSysInfo.gridSize.x * pSysInfo.gridSize.y * pSysInfo.gridSize.z];
-			HANDLE_ERROR(cudaMemcpy(h_CellBegin, d_CellBegin[n], sizeof(uint) * pSysInfo.gridSize.x * pSysInfo.gridSize.y * pSysInfo.gridSize.z, cudaMemcpyDeviceToHost));
-			HANDLE_ERROR(cudaMemcpy(h_CellEnd, d_CellEnd[n], sizeof(uint) * pSysInfo.gridSize.x * pSysInfo.gridSize.y * pSysInfo.gridSize.z, cudaMemcpyDeviceToHost));
-			writeToFile("test.raw", h_CellBegin, h_CellEnd, pSysInfo.gridSize);
-			
-			uint maxParticle = 0;
-			uint maxI = 0;
-
-			for (int i = 0; i < pSysInfo.gridSize.x * pSysInfo.gridSize.y * pSysInfo.gridSize.z; i++) {
-//				std::cout << "Hash: " << i << ", Begin: " << h_CellBegin[i] << ", End: " << h_CellEnd[i] << ", Particles: " << h_CellEnd[i] - h_CellBegin[i] << std::endl;
-				if (maxParticle < h_CellEnd[i] - h_CellBegin[i]) {
-					maxParticle = h_CellEnd[i] - h_CellBegin[i];
-					maxI = i;
-				}
-					
-			}
-			std::cout << "Max particle per cube: " << maxParticle << " at " << maxI << std::endl;
-			delete[] h_CellBegin;
-			delete[] h_CellEnd;
-			*/
-
-			/*
-			// copy array back for verification
-			h_List[n] = new char[p.info.stride * p.info.groupCount];
-			HANDLE_ERROR(cudaMemcpy(h_List[n], d_List[n], p.info.stride * p.info.groupCount, cudaMemcpyDeviceToHost));
-			
-			// value testing
-			for (int i = 0; i < p.info.groupCount; i++) {
-				float3* pos = (float3*)(p.data + i * p.info.stride);
-				float3* posNew = (float3*)(h_List[n] + i * p.info.stride);
-				if (pos->x != posNew->x || pos->y != posNew->y || pos->z != posNew->z)
-					std::cout << i << ": " << pos->x << ", " << pos->y << ", " << pos->z << "; " << posNew->x << ", " << posNew->y << ", " << posNew->z << std::endl;
-			}
-			*/
-			
-		
-		
-			std::cout << "New list with " << p.info.groupCount << " particles" << std::endl;
-		}
-		long long endTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-		std::cout << (endTime - startTime) / 1000.0 << std::endl;
-
-		if (endTime - startTime < minTime)
-			minTime = endTime - startTime;
-		
-		for (int n = 0; n < pList.size(); n++) {
-			HANDLE_ERROR(cudaFree(d_List[n]));
-
-			HANDLE_ERROR(cudaFree(d_HashList[n]));
-			HANDLE_ERROR(cudaFree(d_IdList[n]));
-			HANDLE_ERROR(cudaFree(d_CellBegin[n]));
-			HANDLE_ERROR(cudaFree(d_CellEnd[n]));
-			delete[] h_List[n];
-			delete[] pList[n].data;
-		}
-
-
-	}
-
-	std::cout << minTime / 1000.0f << std::endl;
+ParticleList reduceParticles(const ParticleList pList, float redPercentage) {
+	uint targetCount = (uint)(pList.info.groupCount * (1 - redPercentage));
+	return reduceParticles(pList, targetCount);
 }
 
 long long benchmarkPListGPU(ParticleList p, PSystemInfo pSysInfo, int blocksize, int iterations = 1) {
@@ -384,12 +234,11 @@ long long benchmarkPListGPU(ParticleList p, PSystemInfo pSysInfo, int blocksize,
 		thrust::sort_by_key(thrust::device_ptr<uint>(d_HashList),
 			thrust::device_ptr<uint>(d_HashList + p.info.groupCount * N),
 			thrust::device_ptr<uint>(d_IdList));
-
+		
 		setCellPointers << <dimGrid, dimBlock >> > (d_HashList, d_CellBegin, d_CellEnd, p.info);
 		cudaDeviceSynchronize();
 
 		long long endTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-//		std::cout << (endTime - startTime) / 1000.0 << std::endl;
 
 		if (endTime - startTime < minTime)
 			minTime = endTime - startTime;
@@ -430,13 +279,13 @@ int main(int argc, char **argv)
 {
 	
 
-	Loader loader("laser.mmpld");
+	Loader loader("exp2mill.mmpld");
 
 	auto pLists = loader.getFrame(20);
 
 	uint3 gridSize;
 	gridSize.x = 32;
-	gridSize.y = 32;
+	gridSize.y = 320;
 	gridSize.z = 32;
 	PSystemInfo pSysInfo = loader.calcBSystemInfo(gridSize);
 	
@@ -451,16 +300,20 @@ int main(int argc, char **argv)
 		pSysInfo = loader.calcBSystemInfo(gridSize);
 	}
 	*/
+	benchmarkPListGPU(pLists[0], pSysInfo, 128, 100);
+	
+	/*
 	std::ofstream outputFile("benchmark.csv");
-	outputFile << "Partikel Anzahl; GPU; CPU\n";
+	outputFile << "Partikel Anzahl; GPU\n";
 
 	
-	for (int i = 1; i < 100; i++) {
-		ParticleList pList = reduceParticles(pLists[0], 1 - i * 0.001f);
+	for (uint i = 1; i < 10; i++) {
+		ParticleList pList = reduceParticles(pLists[0], 39870 + i);
 		outputFile << pList.info.groupCount << ";";
-		outputFile << benchmarkPListGPU(pList, pSysInfo, 256, 100) << ";";
-		outputFile << benchmarkPListCPU(pList, pSysInfo, 100) << "\n";
+		outputFile << benchmarkPListGPU(pList, pSysInfo, 128, 100) << "\n";
+//		outputFile << benchmarkPListCPU(pList, pSysInfo, 100) << "\n";
 	}
 	outputFile.close();
+	*/
 	return 0;
 }
