@@ -48,6 +48,18 @@ __host__ __device__ uint calcGridHash(int3 gridPos, PSystemInfo pSysInfo)
 	return gridPos.z * pSysInfo.gridSize.y * pSysInfo.gridSize.x + gridPos.y * pSysInfo.gridSize.x + gridPos.x;
 }
 
+// calculate hash value in grid
+__host__ __device__ int3 calcGridPosFromHash(uint hash, int3 gridSize)
+{
+	int3 pos;
+	uint areaXY = gridSize.x * gridSize.y;
+	pos.x = hash % gridSize.x;
+	pos.y = ((hash - pos.x) % (areaXY)) / gridSize.x;
+	pos.z = (hash - pos.x - (pos.y * gridSize.x)) / areaXY;
+
+	return pos;
+}
+
 // loads the value of type T from char*
 template<typename T>
 __device__ T load(char* d_begin) {
@@ -120,7 +132,7 @@ __global__ void setCellPointers(uint* d_HashList, uint* d_CellBegin, uint* d_Cel
 	}
 }
 
-__global__ void getNumberOfNeighbours(char* d_List, uint* d_CellBegin, uint* d_CellEnd, uint* d_IdList, uint* d_Hash, uint* d_OutCount, ParticleInfo pInfo, uint size, Particle queryParticle, bool aligned) {
+__global__ void getNumberOfNeighboursOld(char* d_List, uint* d_CellBegin, uint* d_CellEnd, uint* d_IdList, uint* d_Hash, uint* d_OutCount, ParticleInfo pInfo, uint size, Particle queryParticle, bool aligned) {
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
 	__shared__ uint blockRet;
 
@@ -168,6 +180,48 @@ __global__ void getNumberOfNeighbours(char* d_List, uint* d_CellBegin, uint* d_C
 			
 //		*d_OutCount = 5;
 
+	}
+}
+
+__global__ void getNumberOfNeighbours(char* d_List, uint* d_CellBegin, uint* d_CellEnd, uint* d_IdList, uint* d_OutCount, ParticleInfo pInfo, PSystemInfo pSysInfo, int3 queryGridSize, Particle queryParticle, int3 lowerBox, bool aligned) {
+	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+	__shared__ uint blockRet;
+	uint size = queryGridSize.x * queryGridSize.y * queryGridSize.z;
+	if (threadIdx.x == 0)
+		blockRet = 0;
+	__syncthreads();
+
+	int3 pos = lowerBox + calcGridPosFromHash(idx, queryGridSize);
+	if (idx < size && pos.x >= 0 && pos.x < pSysInfo.gridSize.x && pos.y >= 0 && pos.y < pSysInfo.gridSize.y && pos.z >= 0 && pos.z < pSysInfo.gridSize.z) {
+
+		uint hash = calcGridHash(pos, pSysInfo);
+		uint n = 0;
+		uint begin = d_CellBegin[hash];
+		uint end = d_CellEnd[hash];
+		Particle particle;
+		particle.radius = pInfo.groupRadius;
+		uint id;
+		for (uint i = begin; i < end; i++) {
+			id = d_IdList[i];
+			if (aligned)
+				particle.pos = *(float3*)(d_List + id * pInfo.stride);
+			else
+				particle.pos = load<float3>(d_List + id * pInfo.stride);
+			if (particle.radius == -1)
+				particle.radius = load<float>(d_List + 12 + id * pInfo.stride);
+
+			if (euclideanDistance(particle.pos - queryParticle.pos) < particle.radius + queryParticle.radius)
+				n++;
+
+		}
+
+		//		printf("Hello thread %d\n", threadIdx.x);
+		atomicAdd((uint*)&blockRet, n);
+
+	}
+	__syncthreads();
+	if (threadIdx.x == 0) {
+		atomicAdd(d_OutCount, blockRet);
 	}
 }
 
@@ -235,9 +289,12 @@ ParticleList reduceParticles(const ParticleList pList, float redPercentage) {
 	return reduceParticles(pList, targetCount);
 }
 
-uint getNumberOfNeighboursGPU(char* d_List, uint* d_CellBegin, uint* d_CellEnd, uint* d_IdList, ParticleInfo pInfo, PSystemInfo pSysInfo, Particle queryParticle, bool aligned) {
+uint getNumberOfNeighboursGPUOld(char* d_List, uint* d_CellBegin, uint* d_CellEnd, uint* d_IdList, ParticleInfo pInfo, PSystemInfo pSysInfo, Particle queryParticle, bool aligned) {
 	long long startTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-	uint threadSize = pSysInfo.gridSize.x * pSysInfo.gridSize.y * pSysInfo.gridSize.z;
+	int3 queryParticlePos = calcGridPos(queryParticle.pos, pSysInfo);
+	int3 queryGridSize = make_int3(2 * queryParticle.radius / pSysInfo.cellSize.x + 3, 2 * queryParticle.radius / pSysInfo.cellSize.y + 3, 2 * queryParticle.radius / pSysInfo.cellSize.z + 3);
+	int3 queryLowerBB = make_int3(queryParticlePos.x - (int)(queryGridSize.x * 0.5), queryParticlePos.y - (int)(queryGridSize.y * 0.5), queryParticlePos.z - (int)(queryGridSize.z * 0.5));
+	uint threadSize = queryGridSize.x * queryGridSize.y * queryGridSize.z;
 
 	uint* d_OutCount;
 	uint* d_Hash;
@@ -245,11 +302,16 @@ uint getNumberOfNeighboursGPU(char* d_List, uint* d_CellBegin, uint* d_CellEnd, 
 	uint h_OutCount = 0;
 
 	uint a = 0;
-	for (uint z = 0; z < pSysInfo.gridSize.z; z++) {
-		for (uint y = 0; y < pSysInfo.gridSize.y; y++) {
-			for (uint x = 0; x < pSysInfo.gridSize.x; x++) {
+	for (int z = queryLowerBB.z; z < queryLowerBB.z + queryGridSize.z; z++) {
+		for (int y = queryLowerBB.y; y < queryLowerBB.y + queryGridSize.y; y++) {
+			for (int x = queryLowerBB.x; x < queryLowerBB.x + queryGridSize.x; x++) {
 				uint i = calcGridHash(make_int3(x, y, z), pSysInfo);
 				h_Hash[a++] = i;
+				/*
+				std::cout << "0pos: " << x << ", " << y << ", " << z << std::endl;
+				int3 pos = calcGridPosFromHash(i, pSysInfo);
+				std::cout << "1pos: " << pos.x << ", " << pos.y << ", " << pos.z << std::endl;
+				*/
 			}
 		}
 	}
@@ -267,42 +329,81 @@ uint getNumberOfNeighboursGPU(char* d_List, uint* d_CellBegin, uint* d_CellEnd, 
 		isAligned = false;
 
 
-	getNumberOfNeighbours << <dimGrid, dimBlock >> > (d_List, d_CellBegin, d_CellEnd, d_IdList, d_Hash, d_OutCount, pInfo, threadSize, queryParticle, isAligned);
+	getNumberOfNeighboursOld << <dimGrid, dimBlock >> > (d_List, d_CellBegin, d_CellEnd, d_IdList, d_Hash, d_OutCount, pInfo, threadSize, queryParticle, isAligned);
 //	cudaDeviceSynchronize();
 	HANDLE_ERROR(cudaMemcpy(&h_OutCount, d_OutCount, sizeof(uint), cudaMemcpyDeviceToHost));
 
 	long long endTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-	std::cout << "GPU: " << (endTime - startTime) / 1000.0f << std::endl;
+	std::cout << "GPU Old: " << (endTime - startTime) / 1000.0f << std::endl;
 	HANDLE_ERROR(cudaFree(d_Hash));
 	HANDLE_ERROR(cudaFree(d_OutCount));
 	delete[] h_Hash;
 	return h_OutCount;
 }
 
+uint getNumberOfNeighboursGPU(char* d_List, uint* d_CellBegin, uint* d_CellEnd, uint* d_IdList, ParticleInfo pInfo, PSystemInfo pSysInfo, Particle queryParticle, bool aligned) {
+	long long startTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+	int3 queryParticlePos = calcGridPos(queryParticle.pos, pSysInfo);
+	int3 queryGridSize = make_int3(2 * queryParticle.radius / pSysInfo.cellSize.x + 3, 2 * queryParticle.radius / pSysInfo.cellSize.y + 3, 2 * queryParticle.radius / pSysInfo.cellSize.z + 3);
+	int3 queryLowerBB = make_int3(queryParticlePos.x - (int) (queryGridSize.x * 0.5), queryParticlePos.y - (int)(queryGridSize.y * 0.5), queryParticlePos.z - (int)(queryGridSize.z * 0.5));
+//	int3 queryGridSize = make_int3(pSysInfo.gridSize.x, pSysInfo.gridSize.y, pSysInfo.gridSize.z);
+//	int3 queryLowerBB = make_int3(0, 0, 0);
+	uint threadSize = queryGridSize.x * queryGridSize.y * queryGridSize.z;
+
+	uint* d_OutCount;
+	uint h_OutCount = 0;
+
+	HANDLE_ERROR(cudaMalloc(&d_OutCount, sizeof(uint)));
+	HANDLE_ERROR(cudaMemset(d_OutCount, 0, sizeof(uint)));
+
+	// kernel call
+	dim3 dimBlock(BLOCKSIZE);
+	dim3 dimGrid(ceil(threadSize / (float)BLOCKSIZE));
+	bool isAligned = true;
+	if (pInfo.stride % 2 != 0)
+		isAligned = false;
+
+
+	getNumberOfNeighbours << <dimGrid, dimBlock >> > (d_List, d_CellBegin, d_CellEnd, d_IdList, d_OutCount, pInfo, pSysInfo, queryGridSize, queryParticle, queryLowerBB, isAligned);
+	//	cudaDeviceSynchronize();
+	HANDLE_ERROR(cudaMemcpy(&h_OutCount, d_OutCount, sizeof(uint), cudaMemcpyDeviceToHost));
+
+	long long endTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+	std::cout << "GPU: " << (endTime - startTime) / 1000.0f << std::endl;
+	HANDLE_ERROR(cudaFree(d_OutCount));
+	return h_OutCount;
+}
+
 uint getNumberOfNeighboursCPU(char* h_List, uint* d_CellBegin, uint* d_CellEnd, uint* d_IdList, ParticleInfo pInfo, PSystemInfo pSysInfo, Particle queryParticle) {
 	uint n = 0;
 	uint hashSize = pSysInfo.gridSize.x * pSysInfo.gridSize.y * pSysInfo.gridSize.z;
-	
+
 	uint* h_CellBegin = new uint[hashSize];
 	uint* h_CellEnd = new uint[hashSize];
 	uint* h_IdList = new uint[pInfo.groupCount];
 	HANDLE_ERROR(cudaMemcpy(h_CellBegin, d_CellBegin, sizeof(uint) * hashSize, cudaMemcpyDeviceToHost));
 	HANDLE_ERROR(cudaMemcpy(h_CellEnd, d_CellEnd, sizeof(uint) * hashSize, cudaMemcpyDeviceToHost));
 	HANDLE_ERROR(cudaMemcpy(h_IdList, d_IdList, sizeof(uint) * pInfo.groupCount, cudaMemcpyDeviceToHost));
+
 	long long startTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-	for (uint z = 0; z < pSysInfo.gridSize.z; z++) {
-		for (uint y = 0; y < pSysInfo.gridSize.y; y++) {
-			for (uint x = 0; x < pSysInfo.gridSize.x; x++) {
-				uint i = calcGridHash(make_int3(x, y, z), pSysInfo);
-				uint begin = h_CellBegin[i];
-				uint end = h_CellEnd[i];
-				for (uint a = begin; a < end; a++) {
-					float3 pos = *(float3*)(h_List + h_IdList[a] * pInfo.stride);
-					float radius = pInfo.groupRadius;
-					if (radius == -1)
-						radius = *(float*)(h_List + h_IdList[a] * pInfo.stride + 12);
-					if (euclideanDistance(pos - queryParticle.pos) < radius + queryParticle.radius)
-						n++;
+	int3 queryParticlePos = calcGridPos(queryParticle.pos, pSysInfo);
+	int3 queryGridSize = make_int3(2 * queryParticle.radius / pSysInfo.cellSize.x + 3, 2 * queryParticle.radius / pSysInfo.cellSize.y + 3, 2 * queryParticle.radius / pSysInfo.cellSize.z + 3);
+	int3 queryLowerBB = make_int3(queryParticlePos.x - (int)(queryGridSize.x * 0.5), queryParticlePos.y - (int)(queryGridSize.y * 0.5), queryParticlePos.z - (int)(queryGridSize.z * 0.5));
+	for (int z = queryLowerBB.z; z < queryLowerBB.z + queryGridSize.z; z++) {
+		for (int y = queryLowerBB.y; y < queryLowerBB.y + queryGridSize.y; y++) {
+			for (int x = queryLowerBB.x; x < queryLowerBB.x + queryGridSize.x; x++) {
+				if (x >= 0 && x < pSysInfo.gridSize.x && y >= 0 && y < pSysInfo.gridSize.y && z >= 0 && z < pSysInfo.gridSize.z) {
+					uint i = calcGridHash(make_int3(x, y, z), pSysInfo);
+					uint begin = h_CellBegin[i];
+					uint end = h_CellEnd[i];
+					for (uint a = begin; a < end; a++) {
+						float3 pos = *(float3*)(h_List + h_IdList[a] * pInfo.stride);
+						float radius = pInfo.groupRadius;
+						if (radius == -1)
+							radius = *(float*)(h_List + h_IdList[a] * pInfo.stride + 12);
+						if (euclideanDistance(pos - queryParticle.pos) < radius + queryParticle.radius)
+							n++;
+					}
 				}
 			}
 		}
@@ -362,9 +463,10 @@ long long benchmarkPListGPU(ParticleList p, PSystemInfo pSysInfo, int iterations
 		cudaDeviceSynchronize();
 
 		Particle particle;
-		particle.pos = make_float3(1, 1, 1);
-		particle.radius = 2000;
+		particle.pos = make_float3(60, 600, 60);
+		particle.radius = 60;
 		long long startTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+//		std::cout << getNumberOfNeighboursGPUOld(d_List, d_CellBegin, d_CellEnd, d_IdList, p.info, pSysInfo, particle, isAligned) << std::endl;
 		std::cout << getNumberOfNeighboursGPU(d_List, d_CellBegin, d_CellEnd, d_IdList, p.info, pSysInfo, particle, isAligned) << std::endl;
 		std::cout << getNumberOfNeighboursCPU(p.data, d_CellBegin, d_CellEnd, d_IdList, p.info, pSysInfo, particle) << std::endl;
 
@@ -414,9 +516,9 @@ int main(int argc, char **argv)
 	auto pLists = loader.getFrame(20);
 
 	uint3 gridSize;
-	gridSize.x = 128;
-	gridSize.y = 128;
-	gridSize.z = 128;
+	gridSize.x = 32;
+	gridSize.y = 320;
+	gridSize.z = 32;
 	PSystemInfo pSysInfo = loader.calcBSystemInfo(gridSize);
 	
 	/*

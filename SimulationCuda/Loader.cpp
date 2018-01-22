@@ -171,6 +171,7 @@ PSystemInfo Loader::calcBSystemInfo(uint3 gridSize)
 	pSysInfo.cellSize.x = (m_highBBox.x - m_lowBBox.x) / gridSize.x;
 	pSysInfo.cellSize.y = (m_highBBox.y - m_lowBBox.y) / gridSize.y;
 	pSysInfo.cellSize.z = (m_highBBox.z - m_lowBBox.z) / gridSize.z;
+	std::cout << "CellSize: " << pSysInfo.cellSize.x << ", " << pSysInfo.cellSize.y << ", " << pSysInfo.cellSize.z << std::endl;
 	return pSysInfo;
 }
 
