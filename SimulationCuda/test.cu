@@ -94,7 +94,7 @@ __device__ bool checkCollision(float3 p1, float3 size1, float3 p2, float3 size2)
 }
 
 __global__ void fillHashGrid(char* d_List, uint* d_HashList, uint* d_IdList, ParticleInfo pInfo, PSystemInfo pSysInfo, bool aligned) {
-	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+	uint idx = blockIdx.x * blockDim.x + threadIdx.x;
 	if (idx < pInfo.groupCount) {
 		float3 f;
 		if(aligned)
@@ -111,7 +111,7 @@ __global__ void fillHashGrid(char* d_List, uint* d_HashList, uint* d_IdList, Par
 }
 
 __global__ void setCellPointers(uint* d_HashList, uint* d_CellBegin, uint* d_CellEnd, ParticleInfo pInfo) {
-	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+	uint idx = blockIdx.x * blockDim.x + threadIdx.x;
 	uint hash = d_HashList[idx];
 	if (idx < pInfo.groupCount) {
 
@@ -129,57 +129,6 @@ __global__ void setCellPointers(uint* d_HashList, uint* d_CellBegin, uint* d_Cel
 		if (idx == pInfo.groupCount - 1) {
 			d_CellEnd[hash] = idx + 1;
 		}
-	}
-}
-
-__global__ void getNumberOfNeighboursOld(char* d_List, uint* d_CellBegin, uint* d_CellEnd, uint* d_IdList, uint* d_Hash, uint* d_OutCount, ParticleInfo pInfo, uint size, Particle queryParticle, bool aligned) {
-	int idx = blockIdx.x * blockDim.x + threadIdx.x;
-	__shared__ uint blockRet;
-
-	if (threadIdx.x == 0)
-		blockRet = 0;
-	__syncthreads();
-
-	if (idx < size) {
-		
-		uint hash = d_Hash[idx];
-		uint n = 0;
-		uint begin = d_CellBegin[hash];
-		uint end = d_CellEnd[hash];
-		Particle particle;
-		particle.radius = pInfo.groupRadius;
-		uint id;
-		for (uint i = begin; i < end; i++) {
-			id = d_IdList[i];
-			if (aligned)
-				particle.pos = *(float3*)(d_List + id * pInfo.stride);
-			else
-				particle.pos = load<float3>(d_List + id * pInfo.stride);
-			if(particle.radius == -1)
-				particle.radius = load<float>(d_List + 12 + id * pInfo.stride);
-
-			if (euclideanDistance(particle.pos - queryParticle.pos) < particle.radius + queryParticle.radius)
-				n++;
-
-		}
-		
-//		printf("Hello thread %d\n", threadIdx.x);
-		atomicAdd((uint*)&blockRet, n);
-
-
-//		*d_OutCount = n;
-
-		__syncthreads();
-		if (threadIdx.x == 0) {
-//			uint ret;
-//			for (int i = 0; i < BLOCKSIZE; i++) {
-//				ret += threadRet[i];
-//			}
-			atomicAdd(d_OutCount, blockRet);
-		}
-			
-//		*d_OutCount = 5;
-
 	}
 }
 
@@ -324,7 +273,7 @@ uint getNumberOfNeighboursGPUOld(char* d_List, uint* d_CellBegin, uint* d_CellEn
 		isAligned = false;
 
 
-	getNumberOfNeighboursOld << <dimGrid, dimBlock >> > (d_List, d_CellBegin, d_CellEnd, d_IdList, d_Hash, d_OutCount, pInfo, threadSize, queryParticle, isAligned);
+//	getNumberOfNeighboursOld << <dimGrid, dimBlock >> > (d_List, d_CellBegin, d_CellEnd, d_IdList, d_Hash, d_OutCount, pInfo, threadSize, queryParticle, isAligned);
 //	cudaDeviceSynchronize();
 	HANDLE_ERROR(cudaMemcpy(&h_OutCount, d_OutCount, sizeof(uint), cudaMemcpyDeviceToHost));
 
@@ -424,11 +373,11 @@ long long benchmarkPListGPU(ParticleList p, PSystemInfo pSysInfo, int iterations
 		uint* d_CellBegin;
 		uint* d_CellEnd;
 
-		long long startTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+		
 		HANDLE_ERROR(cudaMalloc(&d_List, p.info.stride * p.info.groupCount));
 		HANDLE_ERROR(cudaMemcpy(d_List, p.data, p.info.stride * p.info.groupCount, cudaMemcpyHostToDevice));
 
-		
+		long long startTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 		HANDLE_ERROR(cudaMalloc(&d_HashList, sizeof(uint) * p.info.groupCount * N));
 
 		HANDLE_ERROR(cudaMalloc(&d_IdList, sizeof(uint) * p.info.groupCount * N));
@@ -437,7 +386,7 @@ long long benchmarkPListGPU(ParticleList p, PSystemInfo pSysInfo, int iterations
 		HANDLE_ERROR(cudaMemset(d_CellBegin, -1, sizeof(uint) * pSysInfo.gridSize.x * pSysInfo.gridSize.y * pSysInfo.gridSize.z));
 		HANDLE_ERROR(cudaMalloc(&d_CellEnd, sizeof(uint) * pSysInfo.gridSize.x * pSysInfo.gridSize.y * pSysInfo.gridSize.z));
 		HANDLE_ERROR(cudaMemset(d_CellEnd, -1, sizeof(uint) * pSysInfo.gridSize.x * pSysInfo.gridSize.y * pSysInfo.gridSize.z));
-
+		
 
 		// kernel call
 		dim3 dimBlock(BLOCKSIZE);
@@ -448,19 +397,17 @@ long long benchmarkPListGPU(ParticleList p, PSystemInfo pSysInfo, int iterations
 
 		
 		fillHashGrid << <dimGrid, dimBlock >> > (d_List, d_HashList, d_IdList, p.info, pSysInfo, isAligned);
-		HANDLE_ERROR(cudaDeviceSynchronize());
 
 		thrust::sort_by_key(thrust::device_ptr<uint>(d_HashList),
 			thrust::device_ptr<uint>(d_HashList + p.info.groupCount * N),
 			thrust::device_ptr<uint>(d_IdList));
-		HANDLE_ERROR(cudaDeviceSynchronize());
 		
 		setCellPointers << <dimGrid, dimBlock >> > (d_HashList, d_CellBegin, d_CellEnd, p.info);
 		HANDLE_ERROR(cudaDeviceSynchronize());
 
-		Particle particle;
-		particle.pos = make_float3(60, 600, 60);
-		particle.radius = 60;
+//		Particle particle;
+//		particle.pos = make_float3(60, 600, 60);
+//		particle.radius = 60;
 
 //		std::cout << getNumberOfNeighboursGPUOld(d_List, d_CellBegin, d_CellEnd, d_IdList, p.info, pSysInfo, particle, isAligned) << std::endl;
 //		std::cout << getNumberOfNeighboursGPU(d_List, d_CellBegin, d_CellEnd, d_IdList, p.info, pSysInfo, particle, isAligned) << std::endl;
@@ -528,22 +475,23 @@ int main(int argc, char **argv)
 		pSysInfo = loader.calcBSystemInfo(gridSize);
 	}
 	*/
-	ParticleList pList = reduceParticles(pLists[0], 2000000);
-	benchmarkPListGPU(pList, pSysInfo, 10);
-	benchmarkPListCPU(pList, pSysInfo, 10);
+//	loader.isInBBox(pLists, pSysInfo);
+//	ParticleList pList = reduceParticles(pLists[0], 20000000);
+//	benchmarkPListGPU(pLists[0], pSysInfo, 10);
+//	benchmarkPListCPU(pLists[0], pSysInfo, 10);
 	
-	/*
+	
 	std::ofstream outputFile("benchmark.csv");
-	outputFile << "Partikel Anzahl; GPU\n";
+	outputFile << "Partikel Anzahl; GPU; CPU\n";
 
-	
-	for (uint i = 1; i < 10; i++) {
-		ParticleList pList = reduceParticles(pLists[0], 39870 + i);
+	for (uint i = 1; i <= 20; i++) {
+		ParticleList pList = reduceParticles(pLists[0], i * 3000000);
 		outputFile << pList.info.groupCount << ";";
-		outputFile << benchmarkPListGPU(pList, pSysInfo, 128, 100) << "\n";
-//		outputFile << benchmarkPListCPU(pList, pSysInfo, 100) << "\n";
+		outputFile << benchmarkPListGPU(pList, pSysInfo, 10) << "; ";
+		outputFile << benchmarkPListCPU(pList, pSysInfo, 10) << "\n";
+		delete[] pList.data;
 	}
 	outputFile.close();
-	*/
+	
 	return 0;
 }

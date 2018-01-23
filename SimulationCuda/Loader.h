@@ -40,6 +40,9 @@ public:
 	// returns particle lists for wanted frame
 	std::vector<ParticleList> getFrame(uint32_t frameId);
 
+
+	bool Loader::isInBBox(std::vector<ParticleList> pList, PSystemInfo pSysInfo);
+
 	// calculates particle system info with bounding box and wanted gridSize; returns it
 	PSystemInfo calcBSystemInfo(uint3 gridSize);
 	// calculates particle system info with bounding box and wanted cellSize; returns it
@@ -47,12 +50,6 @@ public:
 
 	// calculates particle system info with minimal cellSize for best performance (can take longer to create)
 	PSystemInfo calcBSystemInfo(std::vector<ParticleList> pList);
-
-
-	// calculates particle system info with clipping box and wanted gridSize; returns it
-	PSystemInfo calcCSystemInfo(uint3 gridSize);
-	// calculates particle system info with clipping box and wanted cellSize; returns it
-	PSystemInfo calcCSystemInfo(float3 cellSize);
 
 
 };

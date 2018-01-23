@@ -57,12 +57,12 @@ Loader::Loader(const char * filename)
 		<< box[3] << ", " << box[4] << ", " << box[5] << ")" << std::endl;
 
 	m_file.read(reinterpret_cast<char*>(box), sizeof(float) * 6);
-	m_lowCBox.x = box[0];
-	m_lowCBox.y = box[1];
-	m_lowCBox.z = box[2];
-	m_highCBox.x = box[3];
-	m_highCBox.y = box[4];
-	m_highCBox.z = box[5];
+	m_lowBBox.x = box[0];
+	m_lowBBox.y = box[1];
+	m_lowBBox.z = box[2];
+	m_highBBox.x = box[3];
+	m_highBBox.y = box[4];
+	m_highBBox.z = box[5];
 
 	std::cout << "Clipping box: (" << box[0] << ", " << box[1] << ", " << box[2] << ", "
 		<< box[3] << ", " << box[4] << ", " << box[5] << ")" << std::endl;
@@ -161,6 +161,21 @@ std::vector<ParticleList> Loader::getFrame(uint32_t frameId)
 		pFrame.push_back(pList);
 	}
 	return pFrame;
+}
+
+bool Loader::isInBBox(std::vector<ParticleList> pList, PSystemInfo pSysInfo)
+{
+	for (int a = 0; a < pList.size(); a++) {
+		for (int i = 0; i < pList[a].info.groupCount; i++) {
+			float3 pos = *(float3*)(pList[a].data + i * pList[a].info.stride);
+			if (pos.x < m_lowBBox.x || pos.y < m_lowBBox.y || pos.z < m_lowBBox.z || pos.x >= m_highBBox.x || pos.y >= m_highBBox.y || pos.z >= m_highBBox.z) {
+				std::cout << "WARNING: Some particles are not in the bounding box!" << std::endl;
+				return false;
+			}
+				
+		}
+	}
+	return true;
 }
 
 PSystemInfo Loader::calcBSystemInfo(uint3 gridSize)
