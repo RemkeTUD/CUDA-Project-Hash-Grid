@@ -284,11 +284,6 @@ ParticleList reduceParticles(const ParticleList pList, uint targetCount) {
 	return particles;
 }
 
-ParticleList reduceParticles(const ParticleList pList, float redPercentage) {
-	uint targetCount = (uint)(pList.info.groupCount * (1 - redPercentage));
-	return reduceParticles(pList, targetCount);
-}
-
 uint getNumberOfNeighboursGPUOld(char* d_List, uint* d_CellBegin, uint* d_CellEnd, uint* d_IdList, ParticleInfo pInfo, PSystemInfo pSysInfo, Particle queryParticle, bool aligned) {
 	long long startTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 	int3 queryParticlePos = calcGridPos(queryParticle.pos, pSysInfo);
@@ -429,7 +424,7 @@ long long benchmarkPListGPU(ParticleList p, PSystemInfo pSysInfo, int iterations
 		uint* d_CellBegin;
 		uint* d_CellEnd;
 
-		
+		long long startTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 		HANDLE_ERROR(cudaMalloc(&d_List, p.info.stride * p.info.groupCount));
 		HANDLE_ERROR(cudaMemcpy(d_List, p.data, p.info.stride * p.info.groupCount, cudaMemcpyHostToDevice));
 
@@ -453,22 +448,23 @@ long long benchmarkPListGPU(ParticleList p, PSystemInfo pSysInfo, int iterations
 
 		
 		fillHashGrid << <dimGrid, dimBlock >> > (d_List, d_HashList, d_IdList, p.info, pSysInfo, isAligned);
-
+		HANDLE_ERROR(cudaDeviceSynchronize());
 
 		thrust::sort_by_key(thrust::device_ptr<uint>(d_HashList),
 			thrust::device_ptr<uint>(d_HashList + p.info.groupCount * N),
 			thrust::device_ptr<uint>(d_IdList));
+		HANDLE_ERROR(cudaDeviceSynchronize());
 		
 		setCellPointers << <dimGrid, dimBlock >> > (d_HashList, d_CellBegin, d_CellEnd, p.info);
-		cudaDeviceSynchronize();
+		HANDLE_ERROR(cudaDeviceSynchronize());
 
 		Particle particle;
 		particle.pos = make_float3(60, 600, 60);
 		particle.radius = 60;
-		long long startTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+
 //		std::cout << getNumberOfNeighboursGPUOld(d_List, d_CellBegin, d_CellEnd, d_IdList, p.info, pSysInfo, particle, isAligned) << std::endl;
-		std::cout << getNumberOfNeighboursGPU(d_List, d_CellBegin, d_CellEnd, d_IdList, p.info, pSysInfo, particle, isAligned) << std::endl;
-		std::cout << getNumberOfNeighboursCPU(p.data, d_CellBegin, d_CellEnd, d_IdList, p.info, pSysInfo, particle) << std::endl;
+//		std::cout << getNumberOfNeighboursGPU(d_List, d_CellBegin, d_CellEnd, d_IdList, p.info, pSysInfo, particle, isAligned) << std::endl;
+//		std::cout << getNumberOfNeighboursCPU(p.data, d_CellBegin, d_CellEnd, d_IdList, p.info, pSysInfo, particle) << std::endl;
 
 		long long endTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 
@@ -511,14 +507,14 @@ int main(int argc, char **argv)
 {
 	
 
-	Loader loader("exp2mill.mmpld");
+	Loader loader("laser.00080.chkpt.density.mmpld");
 
-	auto pLists = loader.getFrame(20);
+	auto pLists = loader.getFrame(0);
 
 	uint3 gridSize;
-	gridSize.x = 32;
-	gridSize.y = 320;
-	gridSize.z = 32;
+	gridSize.x = 64;
+	gridSize.y = 64;
+	gridSize.z = 64;
 	PSystemInfo pSysInfo = loader.calcBSystemInfo(gridSize);
 	
 	/*
@@ -532,7 +528,9 @@ int main(int argc, char **argv)
 		pSysInfo = loader.calcBSystemInfo(gridSize);
 	}
 	*/
-	benchmarkPListGPU(pLists[0], pSysInfo, 100);
+	ParticleList pList = reduceParticles(pLists[0], 2000000);
+	benchmarkPListGPU(pList, pSysInfo, 10);
+	benchmarkPListCPU(pList, pSysInfo, 10);
 	
 	/*
 	std::ofstream outputFile("benchmark.csv");
