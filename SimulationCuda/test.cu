@@ -377,7 +377,7 @@ long long benchmarkPListGPU(ParticleList p, PSystemInfo pSysInfo, int iterations
 		HANDLE_ERROR(cudaMalloc(&d_List, p.info.stride * p.info.groupCount));
 		HANDLE_ERROR(cudaMemcpy(d_List, p.data, p.info.stride * p.info.groupCount, cudaMemcpyHostToDevice));
 
-		long long startTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+		
 		HANDLE_ERROR(cudaMalloc(&d_HashList, sizeof(uint) * p.info.groupCount * N));
 
 		HANDLE_ERROR(cudaMalloc(&d_IdList, sizeof(uint) * p.info.groupCount * N));
@@ -395,7 +395,7 @@ long long benchmarkPListGPU(ParticleList p, PSystemInfo pSysInfo, int iterations
 		if (p.info.stride % 2 != 0)
 			isAligned = false;
 
-		
+		long long startTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 		fillHashGrid << <dimGrid, dimBlock >> > (d_List, d_HashList, d_IdList, p.info, pSysInfo, isAligned);
 
 		thrust::sort_by_key(thrust::device_ptr<uint>(d_HashList),
@@ -482,13 +482,13 @@ int main(int argc, char **argv)
 	
 	
 	std::ofstream outputFile("benchmark.csv");
-	outputFile << "Partikel Anzahl; GPU; CPU\n";
+	outputFile << "Partikel Anzahl; GPU\n";
 
 	for (uint i = 1; i <= 20; i++) {
 		ParticleList pList = reduceParticles(pLists[0], i * 3000000);
 		outputFile << pList.info.groupCount << ";";
-		outputFile << benchmarkPListGPU(pList, pSysInfo, 10) << "; ";
-		outputFile << benchmarkPListCPU(pList, pSysInfo, 10) << "\n";
+		outputFile << benchmarkPListGPU(pList, pSysInfo, 10) << "\n";
+//		outputFile << benchmarkPListCPU(pList, pSysInfo, 10) << "\n";
 		delete[] pList.data;
 	}
 	outputFile.close();
