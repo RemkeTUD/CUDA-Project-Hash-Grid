@@ -37,18 +37,18 @@ public:
 	Loader(const char* filename);
 	~Loader();
 
-	// returns particle lists for wanted frame
+	/* Returns particle lists for wanted frame */
 	std::vector<ParticleList> getFrame(uint32_t frameId);
 
 
 	bool Loader::isInBBox(std::vector<ParticleList> pList, PSystemInfo pSysInfo);
 
-	// calculates particle system info with bounding box and wanted gridSize; returns it
+	/* Calculates particle system info with bounding box and wanted gridSize; returns it */
 	PSystemInfo calcBSystemInfo(uint3 gridSize);
-	// calculates particle system info with bounding box and wanted cellSize; returns it
+	/* Calculates particle system info with bounding box and wanted cellSize; returns it */
 	PSystemInfo calcBSystemInfo(float3 cellSize);
 
-	// calculates particle system info with minimal cellSize for best performance (can take longer to create)
+	/* Calculates particle system info with minimal cellSize for best performance (can take longer to create) */
 	PSystemInfo calcBSystemInfo(std::vector<ParticleList> pList);
 
 
