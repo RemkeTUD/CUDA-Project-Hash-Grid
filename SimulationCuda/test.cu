@@ -101,14 +101,14 @@ int main(int argc, char **argv)
 {
 	
 
-	Loader loader("laser.mmpld");
+	Loader loader("exp2mill.mmpld");
 
-	auto pLists = loader.getFrame(200);
+	auto pLists = loader.getFrame(60);
 
 	uint3 gridSize;
-	gridSize.x = 64;
-	gridSize.y = 64;
-	gridSize.z = 64;
+	gridSize.x = 32;
+	gridSize.y = 320;
+	gridSize.z = 32;
 	PSystemInfo pSysInfo = loader.calcBSystemInfo(gridSize);
 	
 	/*
@@ -127,28 +127,31 @@ int main(int argc, char **argv)
 //	benchmarkPListGPU(pLists[0], pSysInfo, 10);
 //	benchmarkPListCPU(pLists[0], pSysInfo, 10);
 	
-	
+	HashGrid hGrid = HashGrid(pLists[0], pSysInfo);
+	hGrid.writeToRawFile("exp2mill.raw");
+
+/*	
 	std::ofstream outputFile("benchmark.csv");
 	outputFile << "Partikel Anzahl; GPU; CPU\n";
 	HashGrid hGrid = HashGrid(pLists[0], pSysInfo);
 	for (uint i = 1; i <= 30; i++) {
-		/*
-		ParticleList pList = reduceParticles(pLists[0], i * 3000000);
-		outputFile << pList.info.groupCount << ";";
-		outputFile << std::round(benchmarkPListGPU(pList, pSysInfo, 10)) << ";";
-		outputFile << benchmarkPListCPU(pList, pSysInfo, 10) << "\n";
-		delete[] pList.data;
-		*/
+		
+		//ParticleList pList = reduceParticles(pLists[0], i * 3000000);
+		//outputFile << pList.info.groupCount << ";";
+		//outputFile << std::round(benchmarkPListGPU(pList, pSysInfo, 10)) << ";";
+		//outputFile << benchmarkPListCPU(pList, pSysInfo, 10) << "\n";
+		//delete[] pList.data;
+		
 
 		float time;
 		Particle p;
 //		p.pos = make_float3(pSysInfo.gridSize.x * 0.5f * pSysInfo.cellSize.x + pSysInfo.worldOrigin.x, pSysInfo.gridSize.y * 0.5f * pSysInfo.cellSize.y + pSysInfo.worldOrigin.y, pSysInfo.gridSize.z * 0.5f * pSysInfo.cellSize.z + pSysInfo.worldOrigin.z);
 //		p.radius = i * pSysInfo.cellSize.x;
 		p.pos = make_float3(pSysInfo.worldOrigin.x + pSysInfo.gridSize.x * pSysInfo.cellSize.x * i / 30.0f, pSysInfo.gridSize.y * 0.5f * pSysInfo.cellSize.y + pSysInfo.worldOrigin.y, pSysInfo.gridSize.z * 0.5f * pSysInfo.cellSize.z + pSysInfo.worldOrigin.z);
-		p.radius = 120;
+		p.radius = 60;
 		std::cout << "Radius: " << p.radius << std::endl;
 		std::cout << p.pos.x << ", " << p.pos.y << ", " << p.pos.z << std::endl;
-		outputFile << std::round(p.radius) << ";";
+		outputFile << std::round(p.pos.x) << ";";
 		
 		uint nGPU = hGrid.getNumberOfNeighboursGPU(p, time, 10);
 		outputFile << std::round(time * 1000) << ";";
@@ -157,7 +160,7 @@ int main(int argc, char **argv)
 		std::cout << "GPU: " << nGPU << "; CPU: " << nCPU << std::endl;
 	}
 	outputFile.close();
-	
+	*/
 
 //	HashGrid hGrid = HashGrid(pLists[0], pSysInfo);
 //	hGrid.writeToRawFile("60mill.raw");
