@@ -28,6 +28,9 @@ public:
 	void writeToRawFile(const std::string& name);
 
 	float initHashGridTime = 0;
+	float copyDataTime = 0;
+	float allocDataTime = 0;
+	float kernelTime = 0;
 
 private:
 	ParticleList p;
@@ -46,10 +49,13 @@ private:
 /* Implementation */
 HashGrid::HashGrid(ParticleList p, PSystemInfo pSysInfo)
 {
+	long long startTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+	long long copyDataStartTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 	HANDLE_ERROR(cudaMalloc(&d_List, p.info.stride * p.info.groupCount));
 	HANDLE_ERROR(cudaMemcpy(d_List, p.data, p.info.stride * p.info.groupCount, cudaMemcpyHostToDevice));
-
-	long long startTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+	long long copyDataEndTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+	
+	long long allocDataStartTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 	HANDLE_ERROR(cudaMalloc(&d_HashList, sizeof(uint) * p.info.groupCount));
 
 	HANDLE_ERROR(cudaMalloc(&d_IdList, sizeof(uint) * p.info.groupCount));
@@ -58,7 +64,7 @@ HashGrid::HashGrid(ParticleList p, PSystemInfo pSysInfo)
 	HANDLE_ERROR(cudaMemset(d_CellBegin, -1, sizeof(uint) * pSysInfo.gridSize.x * pSysInfo.gridSize.y * pSysInfo.gridSize.z));
 	HANDLE_ERROR(cudaMalloc(&d_CellEnd, sizeof(uint) * pSysInfo.gridSize.x * pSysInfo.gridSize.y * pSysInfo.gridSize.z));
 	HANDLE_ERROR(cudaMemset(d_CellEnd, -1, sizeof(uint) * pSysInfo.gridSize.x * pSysInfo.gridSize.y * pSysInfo.gridSize.z));
-
+	long long allocDataEndTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 
 	// kernel call
 	dim3 dimBlock(BLOCKSIZE);
@@ -66,7 +72,7 @@ HashGrid::HashGrid(ParticleList p, PSystemInfo pSysInfo)
 	if (p.info.stride % 2 != 0)
 		isAligned = false;
 
-
+	long long kernelStartTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 	fillHashGrid << <dimGrid, dimBlock >> > (d_List, d_HashList, d_IdList, p.info, pSysInfo, isAligned);
 
 	thrust::sort_by_key(thrust::device_ptr<uint>(d_HashList),
@@ -75,8 +81,12 @@ HashGrid::HashGrid(ParticleList p, PSystemInfo pSysInfo)
 
 	setCellPointers << <dimGrid, dimBlock >> > (d_HashList, d_CellBegin, d_CellEnd, p.info);
 	HANDLE_ERROR(cudaDeviceSynchronize());
+	long long kernelEndTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 	long long endTime = std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 	initHashGridTime = (endTime - startTime) / 1000.0f;
+	copyDataTime = (copyDataEndTime - copyDataStartTime) / 1000.0f;
+	allocDataTime = (allocDataEndTime - allocDataStartTime) / 1000.0f;
+	kernelTime = (kernelEndTime - kernelStartTime) / 1000.0f;
 	this->p = p;
 	this->pSysInfo = pSysInfo;
 }

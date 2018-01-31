@@ -76,6 +76,31 @@ float benchmarkPListGPU(ParticleList p, PSystemInfo pSysInfo, int iterations = 1
 	return minTime;
 }
 
+void benchmarkPListGPU(ParticleList p, PSystemInfo pSysInfo, float& minTime, float& minCopyTime, float& minAllocTime, float& minKernelTime, int iterations = 1) {
+	minTime = std::numeric_limits<float>::max();
+	minCopyTime = std::numeric_limits<float>::max();
+	minAllocTime = std::numeric_limits<float>::max();
+	minKernelTime = std::numeric_limits<float>::max();
+	for (int i = 0; i < iterations; i++) {
+		HashGrid hGrid = HashGrid(p, pSysInfo);
+
+		if (hGrid.initHashGridTime < minTime)
+			minTime = hGrid.initHashGridTime;
+
+		if (hGrid.copyDataTime < minCopyTime)
+			minCopyTime = hGrid.copyDataTime;
+
+		if (hGrid.allocDataTime < minAllocTime)
+			minAllocTime = hGrid.allocDataTime;
+
+		if (hGrid.kernelTime < minKernelTime)
+			minKernelTime = hGrid.kernelTime;
+
+
+	}
+	std::cout << "GPU: Particle count: " << p.info.groupCount << " Time: " << minTime << std::endl;
+}
+
 long long benchmarkPListCPU(ParticleList p, PSystemInfo pSysInfo, int iterations = 1) {
 	unsigned long long minTime = -1;
 	for (int a = 0; a < iterations; a++) {
@@ -101,14 +126,14 @@ int main(int argc, char **argv)
 {
 	
 
-	Loader loader("exp2mill.mmpld");
+	Loader loader("laser.00080.chkpt.density.mmpld");
 
-	auto pLists = loader.getFrame(60);
+	auto pLists = loader.getFrame(0);
 
 	uint3 gridSize;
-	gridSize.x = 32;
-	gridSize.y = 320;
-	gridSize.z = 32;
+	gridSize.x = 128;
+	gridSize.y = 128;
+	gridSize.z = 128;
 	PSystemInfo pSysInfo = loader.calcBSystemInfo(gridSize);
 	
 	/*
@@ -127,22 +152,28 @@ int main(int argc, char **argv)
 //	benchmarkPListGPU(pLists[0], pSysInfo, 10);
 //	benchmarkPListCPU(pLists[0], pSysInfo, 10);
 	
-	HashGrid hGrid = HashGrid(pLists[0], pSysInfo);
-	hGrid.writeToRawFile("exp2mill.raw");
+//	HashGrid hGrid = HashGrid(pLists[0], pSysInfo);
+//	hGrid.writeToRawFile("exp2mill.raw");
 
-/*	
+
 	std::ofstream outputFile("benchmark.csv");
-	outputFile << "Partikel Anzahl; GPU; CPU\n";
-	HashGrid hGrid = HashGrid(pLists[0], pSysInfo);
-	for (uint i = 1; i <= 30; i++) {
+	outputFile << "Partikel Anzahl; Kopieren; Allokieren; Kernel\n";
+	
+	for (uint i = 1; i <= 20; i++) {
 		
-		//ParticleList pList = reduceParticles(pLists[0], i * 3000000);
-		//outputFile << pList.info.groupCount << ";";
-		//outputFile << std::round(benchmarkPListGPU(pList, pSysInfo, 10)) << ";";
-		//outputFile << benchmarkPListCPU(pList, pSysInfo, 10) << "\n";
-		//delete[] pList.data;
+		ParticleList pList = reduceParticles(pLists[0], i * 3000000);
+		outputFile << pList.info.groupCount << ";";
+		float min;
+		float copy;
+		float alloc;
+		float kernel;
+		benchmarkPListGPU(pList, pSysInfo, min, copy, alloc, kernel, 10);
+		outputFile << std::round(copy) << ";";
+		outputFile << std::round(alloc) << ";";
+		outputFile << std::round(kernel) << "\n";
+		delete[] pList.data;
 		
-
+		/*
 		float time;
 		Particle p;
 //		p.pos = make_float3(pSysInfo.gridSize.x * 0.5f * pSysInfo.cellSize.x + pSysInfo.worldOrigin.x, pSysInfo.gridSize.y * 0.5f * pSysInfo.cellSize.y + pSysInfo.worldOrigin.y, pSysInfo.gridSize.z * 0.5f * pSysInfo.cellSize.z + pSysInfo.worldOrigin.z);
@@ -158,9 +189,10 @@ int main(int argc, char **argv)
 		uint nCPU = hGrid.getNumberOfNeighboursCPU(p, time, 10);
 		outputFile << std::round(time * 1000) << "\n";
 		std::cout << "GPU: " << nGPU << "; CPU: " << nCPU << std::endl;
+		*/
 	}
 	outputFile.close();
-	*/
+	
 
 //	HashGrid hGrid = HashGrid(pLists[0], pSysInfo);
 //	hGrid.writeToRawFile("60mill.raw");
