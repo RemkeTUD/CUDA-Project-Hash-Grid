@@ -130,11 +130,7 @@ int main(int argc, char **argv)
 
 	auto pLists = loader.getFrame(0);
 
-	uint3 gridSize;
-	gridSize.x = 128;
-	gridSize.y = 128;
-	gridSize.z = 128;
-	PSystemInfo pSysInfo = loader.calcBSystemInfo(gridSize);
+
 	
 	/*
 	for (int i = 1; i < 11; i++) {
@@ -157,21 +153,17 @@ int main(int argc, char **argv)
 
 
 	std::ofstream outputFile("benchmark.csv");
-	outputFile << "Partikel Anzahl; Kopieren; Allokieren; Kernel\n";
+	outputFile << "Dimension; GPU; CPU\n";
 	
-	for (uint i = 1; i <= 20; i++) {
-		
-		ParticleList pList = reduceParticles(pLists[0], i * 3000000);
-		outputFile << pList.info.groupCount << ";";
-		float min;
-		float copy;
-		float alloc;
-		float kernel;
-		benchmarkPListGPU(pList, pSysInfo, min, copy, alloc, kernel, 10);
-		outputFile << std::round(copy) << ";";
-		outputFile << std::round(alloc) << ";";
-		outputFile << std::round(kernel) << "\n";
-		delete[] pList.data;
+	for (uint i = 0; i <= 9; i++) {
+		uint3 gridSize;
+		gridSize.x = std::pow(2, i);
+		gridSize.y = std::pow(2, i);
+		gridSize.z = std::pow(2, i);
+		PSystemInfo pSysInfo = loader.calcBSystemInfo(gridSize);
+		outputFile << gridSize.x << "x" << gridSize.x << "x" << gridSize.x << ";";
+		outputFile << std::round(benchmarkPListGPU(pLists[0], pSysInfo, 10)) << ";";
+		outputFile << std::round(benchmarkPListCPU(pLists[0], pSysInfo, 10) / 1000.0f) << "\n";
 		
 		/*
 		float time;
